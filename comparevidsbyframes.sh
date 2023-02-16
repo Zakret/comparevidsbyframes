@@ -84,6 +84,12 @@ then
     exit 1
 fi
 
+if ! command -v mediainfo &> /dev/null
+then
+    echo -e "\033[0;33mmediainfo\033[0m could not be found"
+    exit 1
+fi
+
 echo -e "
 $information
 $czkawkaoptions
