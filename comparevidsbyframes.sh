@@ -35,7 +35,8 @@ $czkawkaoptions
     -s=n      --frame-from-sec=n       Fetch a frame n seconds from the beginning of the video.
                                        n must be an integer between 1 and 9.
                                        [by default, the script will take frame from the 2nd second]
-    -c=       --czkawka-config         Pass your own czkawka_cli configuration instead of the default
+    -c=       --czkawka-config=        Pass your own czkawka_cli configuration instead of the default
+    -i=       --ignore-locations=       Ignore files in locations listed in the passed txt file
 "
 
 #    -t=T  --frame-from-time=T         Fetch frame from specified time stamp.
@@ -55,10 +56,10 @@ for i in "$@"; do
       shift
       ;;
     -s=*|--frame-from-sec=*)
-      if [ ${i#*=} -eq ${i#*=} ] 2> /dev/null && [ ${i#*=} -ge 1 ] && [ ${i#*=} -le 9 ];then
+      if [ ${i#*=} -eq ${i#*=} ] 2> /dev/null && [ ${i#*=} -ge 1 ] && [ ${i#*=} -le 59 ];then
         declare -i framefromsec=${i#*=}
       else
-        echo "Incorrect input. It should be integer between 1 and 9"
+        echo "Incorrect input. It should be integer between 1 and 59"
         help
         exit 1
       fi
@@ -66,6 +67,15 @@ for i in "$@"; do
       ;;
     -c=*|--czkawka-config=*)
       czkawkaoptions=${i#*=}
+      shift
+      ;;
+    -i=*|--ignore-locations=*)
+      if [ -f "${i#*=}" ] && [[ "${i#*=}" == *".txt" ]]; then
+        readarray -t ignore < "${i#*=}"
+      else
+        echo "${i#*=} - file doesn't exist or is not a txt file"
+        exit 1
+      fi
       shift
       ;;
     -*|--*)
@@ -78,23 +88,21 @@ for i in "$@"; do
   esac
 done
 
-if ! command -v czkawka_cli &> /dev/null
-then
-    echo -e "\033[0;33mczkawka_cli\033[0m could not be found"
-    exit 1
+if ! command -v czkawka_cli &> /dev/null;then
+  echo -e "\033[0;33mczkawka_cli\033[0m could not be found"
+  exit 1
 fi
 
-if ! command -v mediainfo &> /dev/null
-then
-    echo -e "\033[0;33mmediainfo\033[0m could not be found"
-    exit 1
+if ! command -v mediainfo &> /dev/null;then
+  echo -e "\033[0;33mmediainfo\033[0m could not be found"
+  exit 1
 fi
 
 echo -e "
 $information
 $czkawkaoptions
 "
-read -p "Are you ready to proceed? y/N:" -N 1
+read -r -p "Are you ready to proceed? y/N:" -N 1
 if  ! ( [ $REPLY == "y" ] || [ $REPLY == "Y" ] );then
   echo -e '\r'
   exit
@@ -105,43 +113,58 @@ declare -i i=0
 if [ ! $framefromsec ];then
   declare -i framefromsec=2
 fi
-time="00:00:0$framefromsec"
+if [ $framefromsec -le 9 ];then
+  time="00:00:0$framefromsec"
+else
+  time="00:00:$framefromsec"
+fi
 maindir=~+
 dirforframes="frames_from_${framefromsec}_sec"
 
 if [ ! -d "$maindir/$dirforframes" ];then
-mkdir "$dirforframes"
+  mkdir "$dirforframes"
 
-readarray -d '' vidslist < <(find ~+ $nonrecursive -type f -iname "*.mp4" -print0)
-echo -e '\033[1;33m'${#vidslist[@]} videos to process.'\033[0m'
-declare -i totalvids=${#vidslist[@]}
-
-for v in "${vidslist[@]}"
-do
-#you can comment out if statement if you don't have mediainfo installed, but the whole process will take much longer time
-  if [[ $(mediainfo --Output='Video;%Duration%' "$v") -gt "${framefromsec}000" ]];then
-    name=${v/$maindir/} 
-    name=${name#*/}
-    name=${name////%s%}
-    ffmpeg -ss "$time" -i "$v"  -hide_banner -loglevel error -frames:v 1 -q:v 2 "./$dirforframes/$name.frame.jpg"
-    #mv -t "./$dirforframes" "$v.frame.jpg" 2> /dev/null || :
+  if [ -n "${ignore+set}" ];then
+    ignorearg="-type d \("
+    for j in "${ignore[@]}";do
+      j=$(echo $j|sed 's/\/$//')
+      ignorearg+=" -path '$j' -o"
+    done
+    ignorearg=${ignorearg%-o}
+    ignorearg+="\) -prune -o"
+    findcommand="find $maindir/ $ignorearg $nonrecursive -type f -iname '*.mp4' -print0"
+    readarray -d '' vidslist < <(eval $findcommand)
+  else
+    readarray -d '' vidslist < <(find $maindir/ $nonrecursive -type f -iname '*.mp4' -print0)
   fi
-  i+=1
-  echo -ne "  $(( i*100/totalvids ))%  Fetched $i frames from $totalvids videos.\r"
-done
-echo -e ""
+  echo -e '\033[1;33m'${#vidslist[@]} videos to process.'\033[0m'
+  declare -i totalvids=${#vidslist[@]}
+
+  for v in "${vidslist[@]}";do
+    #you can comment out if statement if you don't have mediainfo installed, but the whole process will take much longer time
+    if [[ $(mediainfo --Output='Video;%Duration%' "$v") -gt "${framefromsec}000" ]];then
+      name=${v/$maindir/} 
+      name=${name#*/}
+      name=${name////%s%}
+      ffmpeg -ss "$time" -i "$v"  -hide_banner -loglevel error -frames:v 1 -q:v 2 "./$dirforframes/$name.frame.jpg"
+      #mv -t "./$dirforframes" "$v.frame.jpg" 2> /dev/null || :
+    fi
+    i+=1
+    echo -ne "  $(( i*100/totalvids ))%  Fetched $i frames from $totalvids videos.\r"
+  done
+  echo -e ""
+
 else
   echo -e  "Updating an existing frames folder..."
-  for f in "$maindir/$dirforframes/"*.jpg
-  do
-  test=$(echo "$f" | sed -r "s/$dirforframes\///;s/%s%/\//g;s/\.frame\.jpg.*$//")
-   if [ ! -f "$test" ];then
-     rm "$f"
-   fi
+  for f in "$maindir/$dirforframes/"*.jpg;do
+    test=$(echo "$f" | sed -r "s/$dirforframes\///;s/%s%/\//g;s/\.frame\.jpg.*$//")
+    if [ ! -f "$test" ];then
+      rm "$f"
+    fi
   done
 fi
 
- echo -e  "\033[1;33mFrame comparison with czkawka_cli:\033[0m"
+echo -e  "\033[1;33mFrame comparison with czkawka_cli:\033[0m"
 
 czkawka_cli image --directories "$maindir/$dirforframes" $czkawkaoptions --file-to-save "./dupes.m3u"
 sed -n -i "s/$dirforframes\///;s/%s%/\//g;s/\.frame\.jpg.*$//p" ./dupes.m3u
