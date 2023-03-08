@@ -32,17 +32,12 @@ $czkawkaoptions
 \033[1;33mOptions\033[0m:
     -h        --help                   Show this text
     -n        --non-recursive          Don't search for videos in other folders
-    -s=n      --frame-from-sec=n       Fetch a frame n seconds from the beginning of the video.
-                                       n must be an integer between 1 and 9.
+    -s=n      --frame-from-sec=n       Fetch a frame n seconds from the beginning of the video 
+                                       or from the end if n is negative.
                                        [by default, the script will take frame from the 2nd second]
     -c=       --czkawka-config=        Pass your own czkawka_cli configuration instead of the default
-    -i=       --ignore-locations=       Ignore files in locations listed in the passed txt file
+    -i=       --ignore-locations=      Ignore files in locations listed in the passed txt file
 "
-
-#    -t=T  --frame-from-time=T         Fetch frame from specified time stamp.
-#                                      Time stamp format is "NN:NN:NN".
-#                                      -s and -t options can't be passed together.
-
 }
 
 for i in "$@"; do
@@ -56,10 +51,10 @@ for i in "$@"; do
       shift
       ;;
     -s=*|--frame-from-sec=*)
-      if [ ${i#*=} -eq ${i#*=} ] 2> /dev/null && [ ${i#*=} -ge 1 ] && [ ${i#*=} -le 59 ];then
+      if [ ${i#*=} -eq ${i#*=} ] 2> /dev/null && [ ${i#*=} -ne 0 ];then
         declare -i framefromsec=${i#*=}
       else
-        echo "Incorrect input. It should be integer between 1 and 59"
+        echo "Incorrect input. It should be integer different from 0"
         help
         exit 1
       fi
@@ -113,11 +108,7 @@ declare -i i=0
 if [ ! $framefromsec ];then
   declare -i framefromsec=2
 fi
-if [ $framefromsec -le 9 ];then
-  time="00:00:0$framefromsec"
-else
-  time="00:00:$framefromsec"
-fi
+
 maindir=~+
 dirforframes="frames_from_${framefromsec}_sec"
 
@@ -142,11 +133,12 @@ if [ ! -d "$maindir/$dirforframes" ];then
 
   for v in "${vidslist[@]}";do
     #you can comment out if statement if you don't have mediainfo installed, but the whole process will take much longer time
-    if [[ $(mediainfo --Output='Video;%Duration%' "$v") -gt "${framefromsec}000" ]];then
+    if [[ $(mediainfo --Output='Video;%Duration%' "$v") -gt "${framefromsec#-}000" ]];then
       name=${v/$maindir/} 
       name=${name#*/}
       name=${name////%s%}
-      ffmpeg -ss "$time" -i "$v"  -hide_banner -loglevel error -frames:v 1 -q:v 2 "./$dirforframes/$name.frame.jpg"
+      if  [ $framefromsec -gt 0 ];then time="-ss $framefromsec";else time="-sseof $framefromsec";fi
+      ffmpeg $time -i "$v"  -hide_banner -loglevel error -frames:v 1 -q:v 2 "./$dirforframes/$name.frame.jpg"
       #mv -t "./$dirforframes" "$v.frame.jpg" 2> /dev/null || :
     fi
     i+=1
