@@ -190,8 +190,7 @@ else
   depcheck "ffmpegthumbnailer"
   for v in "${vidslist[@]}"; do
     namingframes "$v"
-    filemd5=$(echo -n "file://$v" | md5sum)
-    filemd5="${filemd5/ */}.png"
+    filemd5=$(perl -MURI::file -MDigest::MD5=md5_hex -e 'printf "%s.png\n", md5_hex(URI::file->new(shift))' "$v")
     pathtothumbnail="$homedir/.cache/thumbnails/normal/$filemd5"
     if [ ! -f "$pathtothumbnail" ];then
       ffmpegthumbnailer -t 20 -s 128 -f -i "$v" -o "$pathtothumbnail" 2> /dev/null || echo "File error: $v"
